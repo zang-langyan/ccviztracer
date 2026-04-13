@@ -1,0 +1,6 @@
+.cache/
+.pftrace
+result.json
+build/
+web_dist/
+src/viewer/

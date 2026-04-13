@@ -1,0 +1,15 @@
+# reference: https://perfetto.dev/docs/instrumentation/tracing-sdk
+cmake_minimum_required(VERSION 3.20)
+project(perfettosdk)
+
+# Define a static library for Perfetto.
+include_directories(${PROJECT_SOURCE_DIR})
+add_library(perfetto STATIC ${PROJECT_SOURCE_DIR}/perfetto.cc)
+
+if (WIN32)
+  # The perfetto library contains many symbols, so it needs the big object
+  # format.
+  target_compile_options(perfetto PRIVATE "/bigobj")
+  # Disable legacy features in windows.h.
+  add_definitions(-DWIN32_LEAN_AND_MEAN -DNOMINMAX)
+endif (WIN32)
