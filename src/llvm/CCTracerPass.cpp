@@ -9,20 +9,34 @@
 #include "llvm/IR/Verifier.h"
 #include "llvm/Demangle/Demangle.h"
 
+#include "util/cctracer_config.h"
+
 namespace cctracer {
 
 class CCTracerPass : public llvm::PassInfoMixin<CCTracerPass> {
 private:
     bool shouldInstrument(llvm::Function& F) {
+        CCTracerRules& rules = config.rules;
         if (F.isIntrinsic()) return false;
         if (F.isDeclaration()) return false;
         std::string func_name = llvm::demangle(F.getName().str());
         if (func_name == "__cctracer_function_entry" || func_name == "__cctracer_function_exit") {
             return false;
         }
-        return true;
+        return rules.should_instrument(
+            F.getName().str(), 
+            F.getSubprogram() ? F.getSubprogram()->getFilename().str() : ""
+        );
     }
+
+    CCTracerConfig config;
 public:
+    CCTracerPass() {
+        if (!config.load_from_ini(getHomeDir() + "/.cctracer.ini")) {
+            llvm::errs() << "Failed to load .cctracer.ini, using default config.\n";
+        }
+    }
+
     llvm::PreservedAnalyses run(llvm::Function &F, llvm::FunctionAnalysisManager &) {
         if (!shouldInstrument(F)) {
             return llvm::PreservedAnalyses::all();
@@ -33,7 +47,7 @@ public:
 
         // void __cctracer_function_entry(const char* func_name, const char* file_name, int line, int column)
         llvm::FunctionType* EnterType = llvm::FunctionType::get(
-            llvm::Type::getVoidTy(Ctx),
+            llvm::Type::getInt1Ty(Ctx),
             {
                 llvm::PointerType::getUnqual(Ctx), // func_name
                 llvm::PointerType::getUnqual(Ctx), // file_name
@@ -51,7 +65,8 @@ public:
                 llvm::PointerType::getUnqual(Ctx), // func_name
                 llvm::PointerType::getUnqual(Ctx), // file_name
                 llvm::Type::getInt32Ty(Ctx), // line
-                llvm::Type::getInt32Ty(Ctx)  // column
+                llvm::Type::getInt32Ty(Ctx),  // column
+                llvm::Type::getInt1Ty(Ctx) // has_begun
             },
             false
         );
@@ -86,6 +101,7 @@ public:
         }
 
         /* Instrument function entry */
+        llvm::AllocaInst* hasbegunAlloca = nullptr;
         {
             llvm::BasicBlock& EntryBB = F.getEntryBlock();
             llvm::Instruction* FirstInst = &*EntryBB.getFirstInsertionPt();
@@ -94,9 +110,15 @@ public:
                 return llvm::PreservedAnalyses::all();
             }
             llvm::IRBuilder<> Builder(&EntryBB, EntryBB.begin());
+            hasbegunAlloca = Builder.CreateAlloca(llvm::Type::getInt1Ty(Ctx), nullptr, "__cctracer_has_begun");
             llvm::Value *FuncNamePtr = Builder.CreateGlobalString(func_name);
             llvm::Value *FileNamePtr = Builder.CreateGlobalString(file_name);
-            Builder.CreateCall(EnterFunc, {FuncNamePtr, FileNamePtr, Builder.getInt32(start_line), Builder.getInt32(start_col)});
+            llvm::CallInst *EntryCall = Builder.CreateCall(EnterFunc, {FuncNamePtr, FileNamePtr, Builder.getInt32(start_line), Builder.getInt32(start_col)});
+            Builder.CreateStore(EntryCall, hasbegunAlloca);
+        }
+        if (!hasbegunAlloca) {
+            llvm::errs() << "Failed to create alloca for has_begun in function " << func_name << "\n";
+            return llvm::PreservedAnalyses::none();
         }
         /* Instrument return instructions */
         {
@@ -106,7 +128,8 @@ public:
                         llvm::IRBuilder<> Builder(&I);
                         llvm::Value *FuncNamePtr = Builder.CreateGlobalString(func_name);
                         llvm::Value *FileNamePtr = Builder.CreateGlobalString(file_name);
-                        Builder.CreateCall(ExitFunc, {FuncNamePtr, FileNamePtr, Builder.getInt32(end_line), Builder.getInt32(end_col)});
+                        llvm::Value *HasBegun = Builder.CreateLoad(llvm::Type::getInt1Ty(Ctx), hasbegunAlloca);
+                        Builder.CreateCall(ExitFunc, {FuncNamePtr, FileNamePtr, Builder.getInt32(end_line), Builder.getInt32(end_col), HasBegun});
                     }
                 }
             }

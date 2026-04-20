@@ -8,6 +8,8 @@ void foo() {
 }
 
 void bar() {
+    int n = 100;
+    do {} while (n-- > 0);
     printf("Inside bar\n");
 }
 

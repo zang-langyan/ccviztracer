@@ -3,7 +3,8 @@ project(cctrace)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
-set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fno-rtti -fno-exceptions")
+# set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fno-rtti -fno-exceptions")
+set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fno-rtti")
 
 # [[ LLVM ]]
 # TODO: Use find_package(LLVM) instead of hardcoding paths
@@ -45,8 +46,14 @@ endif (MSVC)
 set(EXAMPLE_SRC_DIR ${PROJECT_SOURCE_DIR}/example/example.cpp)
 add_executable(example ${EXAMPLE_SRC_DIR})
 target_compile_options(example PRIVATE 
-    -g
-    -O3
-    -fpass-plugin=${CMAKE_CURRENT_BINARY_DIR}/cctracer_pass.dylib    
+  -g
+  -O3
+  -fpass-plugin=${CMAKE_CURRENT_BINARY_DIR}/cctracer_pass.dylib    
 )
 target_link_libraries(example cctracer)
+
+option(BUILD_TEST "Build cctracer tests" ON)
+if (BUILD_TEST)
+  message("building cctracer tests")
+  add_subdirectory(test)
+endif()
