@@ -1,6 +1,11 @@
 #include "llvm/Passes/PassBuilder.h"
-// #include "llvm/Passes/PassPlugin.h"/* llvm17 */
-#include "llvm/Plugins/PassPlugin.h"
+
+#if __has_include("llvm/Plugins/PassPlugin.h")
+#   include "llvm/Plugins/PassPlugin.h"
+#else
+#   include "llvm/Passes/PassPlugin.h"
+#endif
+
 #include "llvm/IR/Function.h"
 #include "llvm/IR/BasicBlock.h"
 #include "llvm/IR/IRBuilder.h"
