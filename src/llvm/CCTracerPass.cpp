@@ -24,12 +24,12 @@ private:
         CCTracerRules& rules = config.rules;
         if (F.isIntrinsic()) return false;
         if (F.isDeclaration()) return false;
-        std::string func_name = llvm::demangle(F.getName().str());
-        if (func_name == "__cctracer_function_entry" || func_name == "__cctracer_function_exit") {
+        std::string demangle_func_name = llvm::demangle(F.getName().str());
+        if (demangle_func_name == "__cctracer_function_entry" || demangle_func_name == "__cctracer_function_exit") {
             return false;
         }
         return rules.should_instrument(
-            F.getName().str(), 
+            demangle_func_name, 
             F.getSubprogram() ? F.getSubprogram()->getFilename().str() : ""
         );
     }
