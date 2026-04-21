@@ -196,19 +196,15 @@ struct CCTracerConfig {
         if (ini.sections_kv[ini.sections["DEFAULT"]].count("enable_tracing")) {
             enable_tracing = ini.sections_kv[ini.sections["DEFAULT"]]["enable_tracing"] == "1";
             const char* env_enable = getenv("CCTRACER_ENABLE");
-            if (env_enable && std::string(env_enable) == "1") {
-                enable_tracing = true;
-            } else {
-                enable_tracing = false;
+            if (env_enable) {
+                enable_tracing = std::string(env_enable) == "1";
             }
         }
         if (ini.sections_kv[ini.sections["DEFAULT"]].count("use_perfetto")) {
             use_perfetto = ini.sections_kv[ini.sections["DEFAULT"]]["use_perfetto"] == "1";
             const char* env_perfetto = getenv("CCTRACER_PERFETTO");
-            if (env_perfetto && std::string(env_perfetto) == "1") {
-                use_perfetto = true;
-            } else {
-                use_perfetto = false;
+            if (env_perfetto) {
+                use_perfetto = std::string(env_perfetto) == "1";
             }
         }
         if (ini.sections.count("trace_filters") > 0) {
