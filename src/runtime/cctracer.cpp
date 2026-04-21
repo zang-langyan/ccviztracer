@@ -229,15 +229,6 @@ extern "C" {
 
     void __cctracer_function_exit(const char* func_name, const char* file_name, int line, int column, bool has_begun) {
         if (!has_begun) return;
-        if (!cctracer::get_config().enable_tracing) return;
-        if (!cctracer::get_config().rules.should_trace(func_name, file_name)) {
-           return;   
-        }
-        
-        /* check if is within timeline */
-        if (!cctracer::is_active(func_name)) {
-            return;
-        }
 
         /* Emit Event */
         if (cctracer::get_config().use_perfetto) {
