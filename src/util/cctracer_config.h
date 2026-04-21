@@ -187,6 +187,7 @@ struct CCTracerConfig {
     CCTracerRules rules;
     std::string trace_begin;
     std::string trace_until;
+    bool enable_llvm_log = false;
 
     bool load_from_ini(const std::string& path) {
         cctracer::config::Ini ini{path};
@@ -206,6 +207,9 @@ struct CCTracerConfig {
             if (env_perfetto) {
                 use_perfetto = std::string(env_perfetto) == "1";
             }
+        }
+        if (ini.sections_kv[ini.sections["DEFAULT"]].count("enable_llvm_log")) {
+            enable_llvm_log = ini.sections_kv[ini.sections["DEFAULT"]]["enable_llvm_log"] == "1";
         }
         if (ini.sections.count("trace_filters") > 0) {
             auto& kv = ini.sections_kv[ini.sections["trace_filters"]];
@@ -251,6 +255,7 @@ struct CCTracerConfig {
         os << "CCTracerConfig:\n"
            << "\tenable_tracing=" << config.enable_tracing << "\n"
            << "\tuse_perfetto=" << config.use_perfetto << "\n"
+           << "\tenable_llvm_log" << config.enable_llvm_log << "\n"
            << "\trules=" << config.rules << "\n"
            << "\ttrace_begin=" << config.trace_begin << "\n"
            << "\ttrace_until=" << config.trace_until << "\n";

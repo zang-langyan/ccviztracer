@@ -44,6 +44,9 @@ public:
 
     llvm::PreservedAnalyses run(llvm::Function &F, llvm::FunctionAnalysisManager &) {
         if (!shouldInstrument(F)) {
+            if (config.enable_llvm_log) {
+                llvm::errs() << "Skip instrument function: " << llvm::demangle(F.getName().str()) << "\n";
+            }
             return llvm::PreservedAnalyses::all();
         }
 
@@ -140,9 +143,9 @@ public:
             }
         }
 
-        
-        // llvm::errs() << "Instrumenting function: " << func_name << "\n";
-
+        if (config.enable_llvm_log) {
+            llvm::errs() << "Instrumented function: " << func_name << "\n";
+        }
         return llvm::PreservedAnalyses::none();
     }
 
