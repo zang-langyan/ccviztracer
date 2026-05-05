@@ -103,19 +103,19 @@ int main() {
     }
 
     for (int i = 0; i < NUM_THREADS; ++i) {
-        threads.emplace_back(&Worker::doWork, &workers[i], 2000);
+        threads.emplace_back(&Worker::doWork, &workers[i], 20);
     }
     for (auto& t : threads) t.join();
     threads.clear();
 
     
-    std::vector<int> data(10000);
+    std::vector<int> data(100);
     std::iota(data.begin(), data.end(), 0);
     std::shuffle(data.begin(), data.end(), std::mt19937{std::random_device{}()});
     Worker::sortVector(data);
 
     
-    int fib_result = Worker::fibonacci(20);
+    int fib_result = Worker::fibonacci(10);
     std::cout << "Fibonacci(20) = " << fib_result << std::endl;
 
     
@@ -124,7 +124,7 @@ int main() {
     std::condition_variable cv;
     std::atomic<bool> done{false};
     int sum = 0;
-    const int PRODUCER_ITEMS = 500;
+    const int PRODUCER_ITEMS = 10;
     std::thread prod(producer, std::ref(buffer), std::ref(mtx), std::ref(cv), std::ref(done), PRODUCER_ITEMS);
     std::thread cons(consumer, std::ref(buffer), std::ref(mtx), std::ref(cv), std::ref(done), std::ref(sum));
     prod.join();
@@ -147,7 +147,7 @@ int main() {
 
     
     int counter = 0;
-    for (int i = 0; i < 1000; ++i) {
+    for (int i = 0; i < 10; ++i) {
         if (i % 3 == 0) {
             counter += 1;
         } else if (i % 3 == 1) {

@@ -163,6 +163,13 @@ static void send_begin(const char* func_name, const char* file_name, int line, i
                        "{\"ph\":\"B\",\"pid\":%d,\"tid\":%u,\"ts\":%llu,\"name\":\"%s\",\"args\":{\"file\":\"%s\",\"line\":%d,\"column\":%d}},",
                        getpid(), get_thread_id(), (unsigned long long)ts,
                        func_name, file_name, line, column);
+    if (len > sizeof(buffer)) {
+        memset(buffer, 0, sizeof(buffer));
+        len = snprintf(buffer, sizeof(buffer),
+                       "{\"ph\":\"B\",\"pid\":%d,\"tid\":%u,\"ts\":%llu,\"name\":\"%.100s\",\"args\":{\"file\":\"%.200s\",\"line\":%d,\"column\":%d}},",
+                       getpid(), get_thread_id(), (unsigned long long)ts,
+                       func_name, file_name, line, column);
+    }
     append_event(buffer, len);
 }
 
@@ -182,7 +189,8 @@ static void emit_event(uint64_t begin_t, uint64_t end_t, const char* func_name, 
                        getpid(), get_thread_id(), (unsigned long long)begin_t, (unsigned long long)(end_t - begin_t), 
                        func_name, file_name, line, column);
     if (len > sizeof(buffer)) {
-        int len = snprintf(buffer, sizeof(buffer),
+        memset(buffer, 0, sizeof(buffer));
+        len = snprintf(buffer, sizeof(buffer),
             "{\"ph\":\"X\",\"pid\":%d,\"tid\":%u,\"ts\":%llu,\"dur\":%llu,\"name\":\"%.100s...\",\"args\":{\"file\":\"%.200s\",\"line\":%d,\"column\":%d}},",
             getpid(), get_thread_id(), (unsigned long long)begin_t, (unsigned long long)(end_t - begin_t), 
             func_name, file_name, line, column);

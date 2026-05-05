@@ -140,7 +140,7 @@ public:
                         llvm::Value *FuncNamePtr = Builder.CreateGlobalString(func_name);
                         llvm::Value *FileNamePtr = Builder.CreateGlobalString(file_name);
                         llvm::Value *BeginTime = Builder.CreateLoad(llvm::Type::getInt64Ty(Ctx), BeginTimeAlloca);
-                        Builder.CreateCall(ExitFunc, {FuncNamePtr, FileNamePtr, Builder.getInt32(end_line), Builder.getInt32(end_col), BeginTime});
+                        Builder.CreateCall(ExitFunc, {FuncNamePtr, FileNamePtr, Builder.getInt32(start_line), Builder.getInt32(start_col), BeginTime});
                     }
                 }
             }
