@@ -43,14 +43,22 @@ if (MSVC)
 endif (MSVC)
 
 # [[ Example ]]
-set(EXAMPLE_SRC_DIR ${PROJECT_SOURCE_DIR}/example/example.cpp)
-add_executable(example ${EXAMPLE_SRC_DIR})
+set(EXAMPLE_SRC_DIR ${PROJECT_SOURCE_DIR}/example)
+add_executable(example ${EXAMPLE_SRC_DIR}/example.cpp)
 target_compile_options(example PRIVATE 
   -g
   -O3
   -fpass-plugin=${CMAKE_CURRENT_BINARY_DIR}/cctracer_pass.dylib    
 )
 target_link_libraries(example cctracer)
+
+add_executable(multithread ${EXAMPLE_SRC_DIR}/multithread.cpp)
+target_compile_options(multithread PRIVATE 
+  -g
+  -O3
+  -fpass-plugin=${CMAKE_CURRENT_BINARY_DIR}/cctracer_pass.dylib    
+)
+target_link_libraries(multithread cctracer)
 
 option(BUILD_TEST "Build cctracer tests" ON)
 if (BUILD_TEST)

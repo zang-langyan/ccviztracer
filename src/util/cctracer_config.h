@@ -15,6 +15,16 @@ struct CCTracerRules {
     std::vector<std::string> runtime_include_files;
     std::vector<std::string> runtime_exclude_files;
 
+    std::vector<std::regex> instrument_include_functions_regex;
+    std::vector<std::regex> instrument_exclude_functions_regex;
+    std::vector<std::regex> instrument_include_files_regex;
+    std::vector<std::regex> instrument_exclude_files_regex;
+
+    std::vector<std::regex> runtime_include_functions_regex;
+    std::vector<std::regex> runtime_exclude_functions_regex;
+    std::vector<std::regex> runtime_include_files_regex;
+    std::vector<std::regex> runtime_exclude_files_regex;
+
     bool should_instrument(const std::string& func_name, const std::string& file_name) const {
         if (instrument_include_functions.empty() && instrument_include_files.empty() 
             && instrument_exclude_functions.empty() && instrument_exclude_files.empty()) {
@@ -25,9 +35,8 @@ struct CCTracerRules {
             // if none of include rules match, then return false
             if (!instrument_include_functions.empty()) {
                 bool match = false;
-                for (const auto& pattern : instrument_include_functions) {
-                    const std::regex regex_pattern(pattern);
-                    if (std::regex_match(func_name, regex_pattern)) {
+                for (const auto& pattern : instrument_include_functions_regex) {
+                    if (std::regex_match(func_name, pattern)) {
                         match = true;
                         break;
                     }
@@ -38,9 +47,8 @@ struct CCTracerRules {
             }
             if (!instrument_include_files.empty()) {
                 bool match = false;
-                for (const auto& pattern : instrument_include_files) {
-                    const std::regex regex_pattern(pattern);
-                    if (std::regex_match(file_name, regex_pattern)) {
+                for (const auto& pattern : instrument_include_files_regex) {
+                    if (std::regex_match(file_name, pattern)) {
                         match = true;
                         break;
                     }
@@ -50,15 +58,15 @@ struct CCTracerRules {
                 }
             }
             if (!instrument_exclude_functions.empty()) {
-                for (const auto& pattern : instrument_exclude_functions) {
-                    if (std::regex_match(func_name, std::regex(pattern))) {
+                for (const auto& pattern : instrument_exclude_functions_regex) {
+                    if (std::regex_match(func_name, pattern)) {
                         return false;
                     }
                 }
             }
             if (!instrument_exclude_files.empty()) {
-                for (const auto& pattern : instrument_exclude_files) {
-                    if (std::regex_match(file_name, std::regex(pattern))) {
+                for (const auto& pattern : instrument_exclude_files_regex) {
+                    if (std::regex_match(file_name, pattern)) {
                         return false;
                     }
                 }
@@ -85,9 +93,8 @@ struct CCTracerRules {
             // if none of include rules match, then return false
             if (!runtime_include_functions.empty()) {
                 bool match = false;
-                for (const auto& pattern : runtime_include_functions) {
-                    const std::regex regex_pattern(pattern);
-                    if (std::regex_match(func_name, regex_pattern)) {
+                for (const auto& pattern : runtime_include_functions_regex) {
+                    if (std::regex_match(func_name, pattern)) {
                         match = true;
                         break;
                     }
@@ -98,9 +105,8 @@ struct CCTracerRules {
             }
             if (!runtime_include_files.empty()) {
                 bool match = false;
-                for (const auto& pattern : runtime_include_files) {
-                    const std::regex regex_pattern(pattern);
-                    if (std::regex_match(file_name, regex_pattern)) {
+                for (const auto& pattern : runtime_include_files_regex) {
+                    if (std::regex_match(file_name, pattern)) {
                         match = true;
                         break;
                     }
@@ -110,15 +116,15 @@ struct CCTracerRules {
                 }
             }
             if (!file_name.empty() && !runtime_exclude_functions.empty()) {
-                for (const auto& pattern : runtime_exclude_functions) {
-                    if (std::regex_match(func_name, std::regex(pattern))) {
+                for (const auto& pattern : runtime_exclude_functions_regex) {
+                    if (std::regex_match(func_name, pattern)) {
                         return false;
                     }
                 }
             }
             if (!file_name.empty() && !runtime_exclude_files.empty()) {
-                for (const auto& pattern : runtime_exclude_files) {
-                    if (std::regex_match(file_name, std::regex(pattern))) {
+                for (const auto& pattern : runtime_exclude_files_regex) {
+                    if (std::regex_match(file_name, pattern)) {
                         return false;
                     }
                 }
@@ -185,8 +191,12 @@ struct CCTracerConfig {
     bool enable_tracing = false;
     bool use_perfetto = false;
     CCTracerRules rules;
+
     std::string trace_begin;
     std::string trace_until;
+    std::regex trace_begin_regex;
+    std::regex trace_until_regex;
+
     bool enable_llvm_log = false;
 
     bool load_from_ini(const std::string& path) {
@@ -213,38 +223,34 @@ struct CCTracerConfig {
         }
         if (ini.sections.count("trace_filters") > 0) {
             auto& kv = ini.sections_kv[ini.sections["trace_filters"]];
-            if (kv.count("instrument_include_functions") > 0) {
-                rules.instrument_include_functions = split_string(kv["instrument_include_functions"], ',');
-            }
-            if (kv.count("instrument_exclude_functions") > 0) {
-                rules.instrument_exclude_functions = split_string(kv["instrument_exclude_functions"], ',');
-            }
-            if (kv.count("instrument_include_files") > 0) {
-                rules.instrument_include_files = split_string(kv["instrument_include_files"], ',');
-            }
-            if (kv.count("instrument_exclude_files") > 0) {
-                rules.instrument_exclude_files = split_string(kv["instrument_exclude_files"], ',');
-            }
-            if (kv.count("runtime_include_functions") > 0) {
-                rules.runtime_include_functions = split_string(kv["runtime_include_functions"], ',');
-            }
-            if (kv.count("runtime_exclude_functions") > 0) {
-                rules.runtime_exclude_functions = split_string(kv["runtime_exclude_functions"], ',');
-            }
-            if (kv.count("runtime_include_files") > 0) {
-                rules.runtime_include_files = split_string(kv["runtime_include_files"], ',');
-            }
-            if (kv.count("runtime_exclude_files") > 0) {
-                rules.runtime_exclude_files = split_string(kv["runtime_exclude_files"], ',');
-            }
+#define REGISTER_FILTER_RULE(RULES, KV, NAME)                          \
+            do {                                                               \
+                if ((KV).count(#NAME) > 0) {                                   \
+                    (RULES).NAME = split_string((KV)[#NAME], ',');             \
+                    for (const auto& p : (RULES).NAME) {                       \
+                        (RULES).NAME##_regex.emplace_back(p);                  \
+                    }                                                          \
+                }                                                              \
+            } while(0)
+            REGISTER_FILTER_RULE(rules, kv, instrument_include_functions);
+            REGISTER_FILTER_RULE(rules, kv, instrument_exclude_functions);
+            REGISTER_FILTER_RULE(rules, kv, instrument_include_files);
+            REGISTER_FILTER_RULE(rules, kv, instrument_exclude_files);
+
+            REGISTER_FILTER_RULE(rules, kv, runtime_include_functions);
+            REGISTER_FILTER_RULE(rules, kv, runtime_exclude_functions);
+            REGISTER_FILTER_RULE(rules, kv, runtime_include_files);
+            REGISTER_FILTER_RULE(rules, kv, runtime_exclude_files);
         }
         if (ini.sections.count("timeline") > 0) {
             auto& kv = ini.sections_kv[ini.sections["timeline"]];
             if (kv.count("trace_begin") > 0) {
                 trace_begin = kv["trace_begin"];
+                trace_begin_regex = std::regex(trace_begin);
             }
             if (kv.count("trace_until") > 0) {
                 trace_until = kv["trace_until"];
+                trace_until_regex = std::regex(trace_until);
             }
         }
 

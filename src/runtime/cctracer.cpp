@@ -1,8 +1,11 @@
+#include <atomic>
+#include <cstdint>
 #include <cstdio>
 #include <iostream>
 #include <iomanip>
 #include <perfetto.h>
 #include <memory>
+#include <pthread.h>
 #include <string>
 #include <sstream>
 #include <ctime>
@@ -14,31 +17,26 @@
 namespace cctracer {
 
 /* Tracing Control */
-static CCTracerConfig& get_config() {
-    static CCTracerConfig config;
-    static bool loaded = false;
-    if (!loaded) {
-        if (!config.load_from_ini(getHomeDir() + "/.cctracer.ini")) {
-            std::cerr << "Failed to load CCTracer config from ~/.cctracer.ini,"
-                << " using default config." << std::endl;
-        }
-        loaded = true;
+static CCTracerConfig g_config;
+static bool load_config() {
+    if (!g_config.load_from_ini(getHomeDir() + "/.cctracer.ini")) {
+        std::cerr << "Failed to load CCTracer config from ~/.cctracer.ini,"
+            << " using default config." << std::endl;
+        return false;
     }
-    return config;
+    return true;
 }
 
 static bool is_active(const char* func_name) {
-    CCTracerConfig& config = get_config();
+    CCTracerConfig& config = g_config;
     if (config.trace_begin.empty() && config.trace_until.empty()) {
         return true; // No timeline means always trace
     }
     static thread_local bool g_active = false;
-    static const std::regex reg_begin_pat(config.trace_begin);
-    static const std::regex reg_until_pat(config.trace_until);
-    if (!config.trace_begin.empty() && std::regex_search(func_name, reg_begin_pat)) {
+    if (!config.trace_begin.empty() && std::regex_search(func_name, g_config.trace_begin_regex)) {
         g_active = true;
     }
-    if (!config.trace_until.empty() && std::regex_search(func_name, reg_until_pat)) {
+    if (!config.trace_until.empty() && std::regex_search(func_name, g_config.trace_until_regex)) {
         g_active = false;
     }
     return g_active;
@@ -107,13 +105,34 @@ static pthread_mutex_t g_file_lock = PTHREAD_MUTEX_INITIALIZER;
 
 static thread_local char tls_buffer[THREAD_BUFFER_SIZE];
 static thread_local size_t tls_pos = 0;
-static thread_local int tls_first_event = 1; 
+
+static uint32_t get_thread_id() {
+    uint64_t tid;
+    pthread_threadid_np(NULL, &tid);
+    return static_cast<uint32_t>(tid);
+}
 
 static uint64_t get_timestamp_us(void) {
     struct timespec ts;
     clock_gettime(CLOCK_MONOTONIC, &ts);
     return (uint64_t)ts.tv_sec * 1000000 + (uint64_t)ts.tv_nsec / 1000;
 }
+
+class TlsFlushGuard {
+public:
+    ~TlsFlushGuard() {
+        if (tls_pos > 0) {
+            pthread_mutex_lock(&g_file_lock);
+            if (g_trace_file) {
+                fprintf(g_trace_file, "%.*s", (int)tls_pos, tls_buffer);
+            } else {
+                printf("thread_id: %u, g_trace_file is already closed..\n", get_thread_id());
+            }
+            tls_pos = 0;
+            pthread_mutex_unlock(&g_file_lock);
+        }
+    }
+};
 
 static void append_event(const char* event_json, size_t len) {
     if (tls_pos + len + 1 > THREAD_BUFFER_SIZE) {
@@ -124,13 +143,11 @@ static void append_event(const char* event_json, size_t len) {
         }
         fprintf(g_trace_file, "%.*s", (int)len, event_json);
         pthread_mutex_unlock(&g_file_lock);
-        tls_first_event = 0;
         return;
     }
     
     memcpy(tls_buffer + tls_pos, event_json, len);
     tls_pos += len;
-    tls_first_event = 0;
     if (tls_pos >= FLUSH_THRESHOLD) {
         pthread_mutex_lock(&g_file_lock);
         fprintf(g_trace_file, "%.*s", (int)tls_pos, tls_buffer);
@@ -140,10 +157,11 @@ static void append_event(const char* event_json, size_t len) {
 }
 
 static void send_begin(const char* func_name, const char* file_name, int line, int column, uint64_t ts) {
+    static thread_local TlsFlushGuard flush_guard;
     char buffer[1024];
     int len = snprintf(buffer, sizeof(buffer),
-                       "{\"ph\":\"B\",\"pid\":%d,\"tid\":%ld,\"ts\":%llu,\"name\":\"%s\",\"args\":{\"file\":\"%s\",\"line\":%d,\"column\":%d}},",
-                       getpid(), (long)pthread_self(), (unsigned long long)ts,
+                       "{\"ph\":\"B\",\"pid\":%d,\"tid\":%u,\"ts\":%llu,\"name\":\"%s\",\"args\":{\"file\":\"%s\",\"line\":%d,\"column\":%d}},",
+                       getpid(), get_thread_id(), (unsigned long long)ts,
                        func_name, file_name, line, column);
     append_event(buffer, len);
 }
@@ -151,18 +169,41 @@ static void send_begin(const char* func_name, const char* file_name, int line, i
 static void send_end(uint64_t ts) {
     char buffer[256];
     int len = snprintf(buffer, sizeof(buffer),
-                       "{\"ph\":\"E\",\"pid\":%d,\"tid\":%ld,\"ts\":%llu},",
-                       getpid(), (long)pthread_self(), (unsigned long long)ts);
+                       "{\"ph\":\"E\",\"pid\":%d,\"tid\":%u,\"ts\":%llu},",
+                       getpid(), get_thread_id(), (unsigned long long)ts);
+    append_event(buffer, len);
+}
+
+static void emit_event(uint64_t begin_t, uint64_t end_t, const char* func_name, const char* file_name, int line, int column) {
+    static thread_local TlsFlushGuard flush_guard;
+    char buffer[1024];
+    int len = snprintf(buffer, sizeof(buffer),
+                       "{\"ph\":\"X\",\"pid\":%d,\"tid\":%u,\"ts\":%llu,\"dur\":%llu,\"name\":\"%s\",\"args\":{\"file\":\"%s\",\"line\":%d,\"column\":%d}},",
+                       getpid(), get_thread_id(), (unsigned long long)begin_t, (unsigned long long)(end_t - begin_t), 
+                       func_name, file_name, line, column);
+    if (len > sizeof(buffer)) {
+        int len = snprintf(buffer, sizeof(buffer),
+            "{\"ph\":\"X\",\"pid\":%d,\"tid\":%u,\"ts\":%llu,\"dur\":%llu,\"name\":\"%.100s...\",\"args\":{\"file\":\"%.200s\",\"line\":%d,\"column\":%d}},",
+            getpid(), get_thread_id(), (unsigned long long)begin_t, (unsigned long long)(end_t - begin_t), 
+            func_name, file_name, line, column);
+    }
     append_event(buffer, len);
 }
 
 
 /* cctracer */
+static std::atomic<bool> g_cctracer_initialized{false};
+static std::atomic<bool> g_cctracer_enabled{false};
 void __attribute__((constructor)) init_cctracer() {
-    if (!get_config().enable_tracing) {
+    if (!load_config()) {
+        std::cerr << "Fail to load config, using default (disable tracing)";
         return;
     }
-    if (get_config().use_perfetto) {
+    if (!g_config.enable_tracing) {
+        return;
+    }
+    g_cctracer_enabled.store(true, std::memory_order_release);
+    if (g_config.use_perfetto) {
         init_perfetto();
         return;
     } 
@@ -172,13 +213,17 @@ void __attribute__((constructor)) init_cctracer() {
         return;
     }
     fprintf(g_trace_file, "{\"traceEvents\":[");
+    g_cctracer_initialized.store(true, std::memory_order_release);
 }
 
 void __attribute__((destructor)) shutdown_cctracer() {
-    if (!get_config().enable_tracing) {
+    if (!g_cctracer_initialized) {
         return;
     }
-    if (get_config().use_perfetto) {
+    if (!g_cctracer_enabled) {
+        return;
+    }
+    if (g_config.use_perfetto) {
         if (!g_tracing_session) {
             std::cerr << "No tracing session to shut down." << std::endl;
             return;
@@ -205,38 +250,46 @@ void __attribute__((destructor)) shutdown_cctracer() {
 
 extern "C" {
 
-    bool __cctracer_function_entry(const char* func_name, const char* file_name, int line, int column) {
-        if (!cctracer::get_config().enable_tracing) return false;
-        if (!cctracer::get_config().rules.should_trace(func_name, file_name)) {
-           return false;   
+    uint64_t __cctracer_function_entry(const char* func_name, const char* file_name, int line, int column) {
+        if (!cctracer::g_cctracer_initialized.load(std::memory_order_acquire)) {
+            return 0;
+        }
+        if (!cctracer::g_cctracer_enabled.load(std::memory_order_acquire)) {
+            return 0;
+        }
+        if (!cctracer::g_config.rules.should_trace(func_name, file_name)) {
+           return 0;   
         }
 
         /* check if is within timeline */
         if (!cctracer::is_active(func_name)) {
-            return false;
+            return 0;
         }
 
         /* Emit Event */
-        if (cctracer::get_config().use_perfetto) {
-             TRACE_EVENT_BEGIN("cctracer", perfetto::StaticString(func_name),
+        if (cctracer::g_config.use_perfetto) {
+            TRACE_EVENT_BEGIN("cctracer", perfetto::StaticString(func_name),
                     "file", file_name, "line", line, "column", column);
-            return true;
+            return INTMAX_MAX;
         }
         uint64_t ts = cctracer::get_timestamp_us();
-        cctracer::send_begin(func_name, file_name, line, column, ts);
-        return true;
+        // cctracer::send_begin(func_name, file_name, line, column, ts);
+        return ts;
     }
 
-    void __cctracer_function_exit(const char* func_name, const char* file_name, int line, int column, bool has_begun) {
-        if (!has_begun) return;
+    void __cctracer_function_exit(const char* func_name, const char* file_name, int line, int column, uint64_t begin_time) {
+        if (!begin_time) {
+            return;
+        }
 
         /* Emit Event */
-        if (cctracer::get_config().use_perfetto) {
+        if (cctracer::g_config.use_perfetto) {
             TRACE_EVENT_END("cctracer");
             return;
         }
         uint64_t ts = cctracer::get_timestamp_us();
-        cctracer::send_end(ts);
+        // cctracer::send_end(ts);
+        cctracer::emit_event(begin_time, ts, func_name, file_name, line, column);
     }
 
 }

@@ -28,6 +28,9 @@ private:
         if (demangle_func_name == "__cctracer_function_entry" || demangle_func_name == "__cctracer_function_exit") {
             return false;
         }
+        if (demangle_func_name.find("std::__1") == 0) {
+            return false;
+        }
         return rules.should_instrument(
             demangle_func_name, 
             F.getSubprogram() ? F.getSubprogram()->getFilename().str() : ""
@@ -53,9 +56,9 @@ public:
         llvm::Module& M = *F.getParent();
         llvm::LLVMContext& Ctx = M.getContext();
 
-        // void __cctracer_function_entry(const char* func_name, const char* file_name, int line, int column)
+        // uint64_t __cctracer_function_entry(const char* func_name, const char* file_name, int line, int column) 
         llvm::FunctionType* EnterType = llvm::FunctionType::get(
-            llvm::Type::getInt1Ty(Ctx),
+            llvm::Type::getInt64Ty(Ctx),
             {
                 llvm::PointerType::getUnqual(Ctx), // func_name
                 llvm::PointerType::getUnqual(Ctx), // file_name
@@ -66,7 +69,7 @@ public:
         );
         llvm::FunctionCallee EnterFunc = M.getOrInsertFunction("__cctracer_function_entry", EnterType);
 
-        // void __cctracer_function_exit(const char* func_name, const char* file_name, int line, int column)
+        // void __cctracer_function_exit(const char* func_name, const char* file_name, int line, int column, uint64_t begin_time)
         llvm::FunctionType* ExitType = llvm::FunctionType::get(
             llvm::Type::getVoidTy(Ctx),
             {
@@ -74,7 +77,7 @@ public:
                 llvm::PointerType::getUnqual(Ctx), // file_name
                 llvm::Type::getInt32Ty(Ctx), // line
                 llvm::Type::getInt32Ty(Ctx),  // column
-                llvm::Type::getInt1Ty(Ctx) // has_begun
+                llvm::Type::getInt64Ty(Ctx) // begin_time
             },
             false
         );
@@ -109,7 +112,7 @@ public:
         }
 
         /* Instrument function entry */
-        llvm::AllocaInst* hasbegunAlloca = nullptr;
+        llvm::AllocaInst* BeginTimeAlloca = nullptr;
         {
             llvm::BasicBlock& EntryBB = F.getEntryBlock();
             llvm::Instruction* FirstInst = &*EntryBB.getFirstInsertionPt();
@@ -118,13 +121,13 @@ public:
                 return llvm::PreservedAnalyses::all();
             }
             llvm::IRBuilder<> Builder(&EntryBB, EntryBB.begin());
-            hasbegunAlloca = Builder.CreateAlloca(llvm::Type::getInt1Ty(Ctx), nullptr, "__cctracer_has_begun");
+            BeginTimeAlloca = Builder.CreateAlloca(llvm::Type::getInt64Ty(Ctx), nullptr, "__cctracer_begin_time");
             llvm::Value *FuncNamePtr = Builder.CreateGlobalString(func_name);
             llvm::Value *FileNamePtr = Builder.CreateGlobalString(file_name);
             llvm::CallInst *EntryCall = Builder.CreateCall(EnterFunc, {FuncNamePtr, FileNamePtr, Builder.getInt32(start_line), Builder.getInt32(start_col)});
-            Builder.CreateStore(EntryCall, hasbegunAlloca);
+            Builder.CreateStore(EntryCall, BeginTimeAlloca);
         }
-        if (!hasbegunAlloca) {
+        if (!BeginTimeAlloca) {
             llvm::errs() << "Failed to create alloca for has_begun in function " << func_name << "\n";
             return llvm::PreservedAnalyses::none();
         }
@@ -136,8 +139,8 @@ public:
                         llvm::IRBuilder<> Builder(&I);
                         llvm::Value *FuncNamePtr = Builder.CreateGlobalString(func_name);
                         llvm::Value *FileNamePtr = Builder.CreateGlobalString(file_name);
-                        llvm::Value *HasBegun = Builder.CreateLoad(llvm::Type::getInt1Ty(Ctx), hasbegunAlloca);
-                        Builder.CreateCall(ExitFunc, {FuncNamePtr, FileNamePtr, Builder.getInt32(end_line), Builder.getInt32(end_col), HasBegun});
+                        llvm::Value *BeginTime = Builder.CreateLoad(llvm::Type::getInt64Ty(Ctx), BeginTimeAlloca);
+                        Builder.CreateCall(ExitFunc, {FuncNamePtr, FileNamePtr, Builder.getInt32(end_line), Builder.getInt32(end_col), BeginTime});
                     }
                 }
             }

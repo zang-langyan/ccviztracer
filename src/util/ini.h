@@ -4,6 +4,7 @@
 #include <unordered_map>
 #include <fstream>
 #include <sstream>
+#include <vector>
 
 namespace cctracer {
 
