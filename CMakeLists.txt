@@ -7,13 +7,13 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fno-rtti")
 
 # [[ LLVM ]]
-# TODO: Use find_package(LLVM) instead of hardcoding paths
-set(LLVM_INCLUDE_DIRS "/opt/homebrew/opt/llvm/include")
-set(LLVM_LIB_DIRS "/opt/homebrew/opt/llvm/lib")
-set(SRC_DIR ${PROJECT_SOURCE_DIR}/src/)
+find_package(LLVM REQUIRED CONFIG)
+message(STATUS "Found LLVM ${LLVM_PACKAGE_VERSION}")
+message(STATUS "Using LLVMConfig.cmake in: ${LLVM_DIR}")
+message(STATUS "LLVM include: ${LLVM_INCLUDE_DIRS}")
+message(STATUS "LLVM library: ${LLVM_LIBRARY_DIRS}")
+message(STATUS "LLVM tools binary: ${LLVM_TOOLS_BINARY_DIR}")
 include_directories(${LLVM_INCLUDE_DIRS})
-include_directories(${SRC_DIR})
-link_directories(${LLVM_LIB_DIRS})
 
 
 # [[ Perfetto SDK ]]
@@ -23,7 +23,8 @@ add_subdirectory(${PROJECT_SOURCE_DIR}/extern/perfetto_sdk)
 
 
 # [[ LLVM Pass ]]
-add_library(cctracer_pass MODULE ${SRC_DIR}/llvm/CCTracerPass.cpp)
+include_directories(${PROJECT_SOURCE_DIR}/src)
+add_library(cctracer_pass MODULE ${PROJECT_SOURCE_DIR}/src/llvm/CCTracerPass.cpp)
 target_link_libraries(cctracer_pass LLVM)
 
 set_target_properties(cctracer_pass PROPERTIES
@@ -32,7 +33,7 @@ set_target_properties(cctracer_pass PROPERTIES
 )
 
 # [[ Runtime ]]
-add_library(cctracer STATIC src/runtime/cctracer.cpp)
+add_library(cctracer STATIC ${PROJECT_SOURCE_DIR}/src/runtime/cctracer.cpp)
 target_link_libraries(cctracer perfetto ${CMAKE_THREAD_LIBS_INIT})
 if (WIN32)
   target_link_libraries(cctracer ws2_32)
