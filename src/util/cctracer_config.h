@@ -189,7 +189,6 @@ struct CCTracerRules {
 
 struct CCTracerConfig {
     bool enable_tracing = false;
-    bool use_perfetto = false;
     CCTracerRules rules;
 
     std::string trace_begin;
@@ -209,13 +208,6 @@ struct CCTracerConfig {
             const char* env_enable = getenv("CCTRACER_ENABLE");
             if (env_enable) {
                 enable_tracing = std::string(env_enable) == "1";
-            }
-        }
-        if (ini.sections_kv[ini.sections["DEFAULT"]].count("use_perfetto")) {
-            use_perfetto = ini.sections_kv[ini.sections["DEFAULT"]]["use_perfetto"] == "1";
-            const char* env_perfetto = getenv("CCTRACER_PERFETTO");
-            if (env_perfetto) {
-                use_perfetto = std::string(env_perfetto) == "1";
             }
         }
         if (ini.sections_kv[ini.sections["DEFAULT"]].count("enable_llvm_log")) {
@@ -260,7 +252,6 @@ struct CCTracerConfig {
     friend std::ostream& operator<<(std::ostream& os, const CCTracerConfig& config) {
         os << "CCTracerConfig:\n"
            << "\tenable_tracing=" << config.enable_tracing << "\n"
-           << "\tuse_perfetto=" << config.use_perfetto << "\n"
            << "\tenable_llvm_log" << config.enable_llvm_log << "\n"
            << "\trules=" << config.rules << "\n"
            << "\ttrace_begin=" << config.trace_begin << "\n"

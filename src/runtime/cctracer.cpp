@@ -2,8 +2,8 @@
 #include <cstdint>
 #include <cstdio>
 #include <iostream>
+#include <cstring>
 #include <iomanip>
-#include <perfetto.h>
 #include <memory>
 #include <pthread.h>
 #include <string>
@@ -43,56 +43,6 @@ static bool is_active(const char* func_name) {
 }
 
 } // namespace cctracer
-
-/* Perfetto Sdk */
-PERFETTO_DEFINE_CATEGORIES(
-    perfetto::Category("cctracer").SetDescription("CCTracer Events")
-);
-PERFETTO_TRACK_EVENT_STATIC_STORAGE();
-
-#define PERFETTO_BUFFER_SIZE_KB (1024 * 1024 * 2) // 2GB
-
-static std::unique_ptr<perfetto::TracingSession> g_tracing_session;
-
-void init_perfetto() {
-    perfetto::TracingInitArgs args;
-    args.backends = perfetto::kInProcessBackend;
-    args.shmem_size_hint_kb = 1024 * 32;
-    perfetto::Tracing::Initialize(args);
-    perfetto::TrackEvent::Register();
-
-    perfetto::TraceConfig cfg;
-    auto* buffer = cfg.add_buffers();
-    buffer->set_size_kb(PERFETTO_BUFFER_SIZE_KB);
-    buffer->set_fill_policy(
-        perfetto::protos::gen::TraceConfig_BufferConfig_FillPolicy::TraceConfig_BufferConfig_FillPolicy_RING_BUFFER
-    );
-    cfg.set_write_into_file(true);
-    auto now = std::chrono::system_clock::now();
-    auto time_t = std::chrono::system_clock::to_time_t(now);
-    auto us = std::chrono::duration_cast<std::chrono::microseconds>(
-                  now - std::chrono::system_clock::from_time_t(time_t))
-                  .count();
-    std::stringstream ss;
-    ss << "cctrace." << std::put_time(std::localtime(&time_t), "%Y%m%d%H%M%S") << "." << us << ".pftrace";
-    cfg.set_output_path(ss.str());
-    cfg.set_write_flush_mode(perfetto::TraceConfig::WriteFlushMode::TraceConfig_WriteFlushMode_WRITE_FLUSH_DISABLED);
-    cfg.set_flush_period_ms(20);
-
-    perfetto::DataSourceConfig* ds_cfg = cfg.add_data_sources()->mutable_config();
-    ds_cfg->set_name("track_event");
-
-    g_tracing_session = perfetto::Tracing::NewTrace();
-    g_tracing_session->Setup(cfg);
-    g_tracing_session->StartBlocking();
-}
-
-void shutdown_perfetto() {
-    g_tracing_session->Flush([](bool success) {
-        std::cout << "Final flush " << (success ? "succeeded" : "failed") << std::endl;
-    });
-    g_tracing_session->StopBlocking();
-}
 
 namespace cctracer {
 
@@ -211,10 +161,7 @@ void __attribute__((constructor)) init_cctracer() {
         return;
     }
     g_cctracer_enabled.store(true, std::memory_order_release);
-    if (g_config.use_perfetto) {
-        init_perfetto();
-        return;
-    } 
+
     g_trace_file = fopen("result.json", "w");
     if (!g_trace_file) {
         std::cerr << "Failed to open trace output file" << std::endl;
@@ -231,14 +178,7 @@ void __attribute__((destructor)) shutdown_cctracer() {
     if (!g_cctracer_enabled) {
         return;
     }
-    if (g_config.use_perfetto) {
-        if (!g_tracing_session) {
-            std::cerr << "No tracing session to shut down." << std::endl;
-            return;
-        }
-        shutdown_perfetto();
-        return;
-    }
+
     if (!g_trace_file) {
         std::cerr << "Trace file not open, cannot write trace output" << std::endl;
         return;
@@ -275,11 +215,6 @@ extern "C" {
         }
 
         /* Emit Event */
-        if (cctracer::g_config.use_perfetto) {
-            TRACE_EVENT_BEGIN("cctracer", perfetto::StaticString(func_name),
-                    "file", file_name, "line", line, "column", column);
-            return INTMAX_MAX;
-        }
         uint64_t ts = cctracer::get_timestamp_us();
         // cctracer::send_begin(func_name, file_name, line, column, ts);
         return ts;
@@ -291,10 +226,6 @@ extern "C" {
         }
 
         /* Emit Event */
-        if (cctracer::g_config.use_perfetto) {
-            TRACE_EVENT_END("cctracer");
-            return;
-        }
         uint64_t ts = cctracer::get_timestamp_us();
         // cctracer::send_end(ts);
         cctracer::emit_event(begin_time, ts, func_name, file_name, line, column);
