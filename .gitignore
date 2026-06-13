@@ -4,3 +4,4 @@ result.json
 build/
 web_dist/
 src/viewer/
+__pycache__/
