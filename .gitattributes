@@ -1,0 +1,3 @@
+tools/webui-dist/ linguist-vendored
+*.sh linguist-detectable=false
+*.ini linguist-detectable=false

@@ -5,3 +5,5 @@ build/
 web_dist/
 src/viewer/
 __pycache__/
+test-dist/
+webui-dist-deprecated/

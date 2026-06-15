@@ -1,48 +1,70 @@
-import atexit
 import os
-import sys
-import subprocess
-import http.server
+import socketserver
+from http.server import SimpleHTTPRequestHandler
 import socket
 import random
+import json
+from urllib.parse import urlparse, parse_qs
+from pathlib import Path
+import contextlib
+from utils.filesource import getsource
 
 UI_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'webui-dist')
 TRACE_SYMFILE = 'result.json'
 
-# TODO: serve trace file independently, need to change ui to fetch when loading
-class TraceProcessorProcess:
-    trace_processor_path = os.path.join(UI_PATH, 'trace_processor')
+@contextlib.contextmanager
+def chdir_temp(d):
+    cur = os.getcwd()
+    os.chdir(d)
+    try:
+        yield
+    finally:
+        os.chdir(cur)
+
+
+class TraceFileServer(SimpleHTTPRequestHandler):
+    trace_file_path = None
+    ui_path = UI_PATH
+    sourcefile_path: str
+    debug_mode = False
+    def _set_headers(self, status=200, content_type='application/json'):
+        self.send_response(status)
+        self.send_header('Content-Type', content_type)
+        self.send_header('Access-Control-Allow-Origin', '*')
+        self.send_header('Access-Control-Allow-Methods', 'GET')
+        self.send_header('Access-Control-Allow-Headers', 'Content-Type')
+        self.end_headers()
     
-    def start(self, path):
-        self.path = path
-        self._process = subprocess.Popen(
-            [
-                sys.executable,
-                self.trace_processor_path,
-                self.path,
-                "-D",
-            ],
-            stderr=subprocess.PIPE,
-        )
-        atexit.register(self.stop)
-        self._wait_load()
+    def do_GET(self):
+        parsed = urlparse(self.path)
+        path = parsed.path
+        if path == "/ccviztracer/localtrace" and self.trace_file_path:
+            trace_path = Path(self.trace_file_path)
+            if not self.trace_file_path or not trace_path.is_file():
+                self.send_error(404, "Trace file not found")
+                return
+            content_type = "application/octet-stream"
+            if trace_path.suffix == ".json":
+                content_type = "application/json"
+            elif trace_path.suffix == ".gz":
+                content_type = "application/gzip"
+            self._set_headers(200, content_type)
+            with open(trace_path, "rb") as f:
+                self.wfile.write(f.read())
+        elif path == '/ccviztracer/getfilesource':
+            params = parse_qs(parsed.query)
+            source_path = params.get('path', [''])[0]
+            with chdir_temp(self.sourcefile_path):
+                src = getsource(source_path)
+            response = {'message': f'{src}'}
+            self._set_headers(200)
+            self.wfile.write(json.dumps(response).encode('utf-8'))
+        else:
+            return super().do_GET()
 
-    def _wait_load(self):
-        print("Loading and parsing trace data, this could take a while...")
-        assert self._process.stderr is not None
-        while True:
-            line = self._process.stderr.readline().decode("utf-8")
-            if "This server can be used" in line:
-                break
-
-    def stop(self):
-        self._process.terminate()
-        try:
-            self._process.wait(timeout=2)
-        except subprocess.TimeoutExpired:
-            self._process.kill()
-        atexit.unregister(self.stop)
-
+    def log_message(self, format, *args):
+        if self.debug_mode:
+            super().log_message(format, *args)
 
 def find_free_port(start=8000, max_attempts=100):
     """Find a free TCP port."""
@@ -53,16 +75,17 @@ def find_free_port(start=8000, max_attempts=100):
                 return port
     raise RuntimeError("No free port found.")
 
-def start_ui(port = None):
+def start_ui(port = None, tracefile = None, isTest = False):
     """Start Perfetto UI"""
-    UI_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'webui-dist')
-    os.chdir(UI_PATH)
     if not port:
-        trace_processor = TraceProcessorProcess()
-        trace_processor.start('./result.json')
-        # port = find_free_port()
-        port = 10000 # Perfetto trace processor only accepts requests from localhost:10000
-    handler = http.server.SimpleHTTPRequestHandler
-    httpd = http.server.HTTPServer(('localhost', port), handler)
-    print(f"🌐 VizCCTracer running at http://localhost:{port}")
-    httpd.serve_forever()
+        port = find_free_port()
+    TraceFileServer.trace_file_path = tracefile
+    TraceFileServer.sourcefile_path = os.getcwd()
+    if isTest:
+        TraceFileServer.debug_mode = True
+        TraceFileServer.ui_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'test-dist')
+    os.chdir(TraceFileServer.ui_path)
+
+    with socketserver.TCPServer(('127.0.0.1', port), TraceFileServer) as httpd:
+        print(f"🌐 VizCCTracer running at http://127.0.0.1:{port}")
+        httpd.serve_forever()

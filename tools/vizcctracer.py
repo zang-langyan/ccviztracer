@@ -1,10 +1,8 @@
 import os
 import sys
 import shutil
-from multiprocessing import Process
 import argparse
 from pathlib import Path
-import fileserver
 import uiserver
 
 def getargs():
@@ -25,20 +23,21 @@ def getargs():
         type=int,
         help='preferred port for visualization, (use when you provide no trace file)'
     )
+    ap.add_argument(
+        '-d', '--debug',
+        default=False,
+        action="store_true",
+        help=argparse.SUPPRESS 
+    )
     args = ap.parse_args()
     checkargs(args)
     return args
 
 def checkargs(args):
-    if args.trace_file and args.port:
-        print(f'Do not provide trace_file and port at the same time')
-        print(f'If you want to use a custom port, provide the port and open the trace file inside ui')
-        print(f'Otherwise provide the trace_file and the ui will open on http://localhost:10000')
-        sys.exit(1)
-
-    if not args.port and not args.trace_file:
-        args.port = uiserver.find_free_port()
-    if args.trace_file and args.trace_file.exists():
+    if args.trace_file:
+        if not args.trace_file.exists() or not args.trace_file.is_file():
+            print(f'Trace File: \'{args.trace_file}\' Not Found')
+            sys.exit(-1)
         args.trace_file = os.path.realpath(args.trace_file)
 
 def symlink_or_copy_trace_to_ui_dir(trace_file):
@@ -56,14 +55,9 @@ def symlink_or_copy_trace_to_ui_dir(trace_file):
 
 def main():
     args = getargs()
-    if args.trace_file:
-        symlink_or_copy_trace_to_ui_dir(args.trace_file)
-    filesource_process = Process(target=fileserver.start_filesource_server)
-    filesource_process.start()
     try:
-        uiserver.start_ui(args.port)
+        uiserver.start_ui(args.port, args.trace_file, args.debug)
     except KeyboardInterrupt:
-        filesource_process.kill()
         print('\nShutting Down VizCCTracer..')
         sys.exit(0)
 
