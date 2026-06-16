@@ -1,4 +1,5 @@
 import os
+import shutil
 import socketserver
 from http.server import SimpleHTTPRequestHandler
 import socket
@@ -27,9 +28,14 @@ class TraceFileServer(SimpleHTTPRequestHandler):
     ui_path = UI_PATH
     sourcefile_path: str
     debug_mode = False
-    def _set_headers(self, status=200, content_type='application/json'):
+    def _set_headers(self,
+                     status=200,
+                     content_type='application/json',
+                     content_len=None):
         self.send_response(status)
         self.send_header('Content-Type', content_type)
+        if content_len:
+            self.send_header("Content-Length", str(content_len))
         self.send_header('Access-Control-Allow-Origin', '*')
         self.send_header('Access-Control-Allow-Methods', 'GET')
         self.send_header('Access-Control-Allow-Headers', 'Content-Type')
@@ -43,14 +49,20 @@ class TraceFileServer(SimpleHTTPRequestHandler):
             if not self.trace_file_path or not trace_path.is_file():
                 self.send_error(404, "Trace file not found")
                 return
+            file_size = trace_path.stat().st_size
             content_type = "application/octet-stream"
             if trace_path.suffix == ".json":
                 content_type = "application/json"
             elif trace_path.suffix == ".gz":
                 content_type = "application/gzip"
-            self._set_headers(200, content_type)
+            self._set_headers(200, content_type, file_size)
             with open(trace_path, "rb") as f:
-                self.wfile.write(f.read())
+                try:
+                    shutil.copyfileobj(f, self.wfile, length=240*1024*1024)
+                    self.wfile.flush()
+                    # self.wfile.write(f.read())
+                except (BrokenPipeError, ConnectionResetError, OSError) as e:
+                    print('Fail to write to stream, cut off transmitting now.', e)
         elif path == '/ccviztracer/getfilesource':
             params = parse_qs(parsed.query)
             source_path = params.get('path', [''])[0]
