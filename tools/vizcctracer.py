@@ -8,20 +8,21 @@ import uiserver
 def getargs():
     ap = argparse.ArgumentParser(
         description='''VizCCtracer''',
-        epilog='''run vizcctracer at the root of your project folder 
+        epilog='''IMPORTANT: run vizcctracer at the root of your project folder 
         so that vizcctracer can find your source code'''
     )
     ap.add_argument(
         '-tf', '--trace_file',
         default=None,
         type=Path,
-        help='path to the trace file (e.g. result.json or result.pftrace)'
+        help='''path to the trace file (e.g. result.json or result.pftrace)
+        , you can also skip this and open the trace file within the ui'''
     )
     ap.add_argument(
         '-p', '--port',
         default=None,
         type=int,
-        help='preferred port for visualization, (use when you provide no trace file)'
+        help='port preferred, a random one will be selected if not provided'
     )
     ap.add_argument(
         '-d', '--debug',
@@ -40,19 +41,6 @@ def checkargs(args):
             sys.exit(-1)
         args.trace_file = os.path.realpath(args.trace_file)
 
-def symlink_or_copy_trace_to_ui_dir(trace_file):
-    TRACE_DEST = os.path.join(uiserver.UI_PATH, uiserver.TRACE_SYMFILE)
-    print(uiserver.UI_PATH)
-    print(TRACE_DEST)
-    try:
-        if os.path.exists(TRACE_DEST):
-            os.unlink(TRACE_DEST)
-        os.symlink(trace_file, TRACE_DEST)
-        print(f'Created symlink: {TRACE_DEST} -> {trace_file}')
-    except OSError:
-        shutil.copy2(trace_file, TRACE_DEST)
-        print(f'Copied {trace_file} -> {TRACE_DEST}')
-
 def main():
     args = getargs()
     try:
@@ -60,6 +48,7 @@ def main():
     except KeyboardInterrupt:
         print('\nShutting Down VizCCTracer..')
         sys.exit(0)
+
 
 if __name__ == '__main__':
     main()

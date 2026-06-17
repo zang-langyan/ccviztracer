@@ -35,24 +35,26 @@ Check out `CMakeLists.txt` for CMake usage example.
 After execution, a `result.json` file will be produced. Put that file in [ui.perfetto.dev](https://ui.perfetto.dev/), then you will see the visualized result supported by perfetto.
 
 ### View Trace
+Run tools/vizcctracer.py and open `127.0.0.1:<port>` to view the trace
 ```sh
-# IMPORTANT: cd to your project dir so that vizcctracer can find your source file
-# method 1: go to http://localhost:<port> and open the trace file within the ui
-python3 <path-to>/vizcctracer.py
-python3 <path-to>/vizcctracer.py -p <port> 
-🌐 VizCCTracer running at http://localhost:<port>
+python3 tools/vizcctracer.py -h
+usage: vizcctracer.py [-h] [-tf TRACE_FILE] [-p PORT]
 
-# method 2: 
-python3 <path-to>/vizcctracer.py -tf <path-to-your-trace>
-🌐 VizCCTracer running at http://localhost:10000
+VizCCtracer
+
+options:
+  -h, --help            show this help message and exit
+  -tf, --trace_file TRACE_FILE
+                        path to the trace file (e.g. result.json or result.pftrace) , you can also skip this and open the trace file within the ui
+  -p, --port PORT       port preferred, a random one will be selected if not provided
+
+IMPORTANT: run vizcctracer at the root of your project folder so that vizcctracer can find your source code
 ```
-
-
 
 ## Use Case
 <figure>
   <img src="./img/cpython.png" alt="cpython use case">
-  <figcaption align="center"><b>Figure 2:</b> My own use case for exploring CPython source code execution</figcaption>
+  <figcaption align="center"><b>Figure 3:</b> My own use case for exploring CPython source code execution</figcaption>
 </figure>
 
 
