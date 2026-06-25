@@ -22,6 +22,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>. */
 #include <ctime>
 #include <regex>
 #include <unistd.h>
+#include "dumper.h"
 #include "util/cctracer_config.h"
 #include "util/ini.h"
 
@@ -57,15 +58,15 @@ static bool is_active(const char* func_name) {
 
 namespace cctracer {
 
-/* Block and Write to json */
-#define THREAD_BUFFER_SIZE (1024 * 1024 * 10)
-#define FLUSH_THRESHOLD    (THREAD_BUFFER_SIZE - 4096) 
+static Dumper& get_dumper() {
+    static Dumper instance;
+    return instance;
+}
+#define DUMPER get_dumper()
 
 static FILE* g_trace_file = NULL;
-static pthread_mutex_t g_file_lock = PTHREAD_MUTEX_INITIALIZER;
 
-static thread_local char tls_buffer[THREAD_BUFFER_SIZE];
-static thread_local size_t tls_pos = 0;
+
 
 static uint32_t get_thread_id() {
     uint64_t tid;
@@ -73,90 +74,68 @@ static uint32_t get_thread_id() {
     return static_cast<uint32_t>(tid);
 }
 
-static uint64_t get_timestamp_us(void) {
+static uint64_t get_timestamp(void) {
     struct timespec ts;
     clock_gettime(CLOCK_MONOTONIC, &ts);
-    return (uint64_t)ts.tv_sec * 1000000 + (uint64_t)ts.tv_nsec / 1000;
+    return (uint64_t)ts.tv_sec * 1000000000ULL + (uint64_t)ts.tv_nsec;
 }
 
 class TlsFlushGuard {
+private:
+    std::vector<TraceEvent> events;
 public:
+    TlsFlushGuard() {
+        events.reserve(10240);
+    }
+
     ~TlsFlushGuard() {
-        if (tls_pos > 0) {
-            pthread_mutex_lock(&g_file_lock);
-            if (g_trace_file) {
-                fprintf(g_trace_file, "%.*s", (int)tls_pos, tls_buffer);
-            } else {
-                printf("thread_id: %u, g_trace_file is already closed..\n", get_thread_id());
-            }
-            tls_pos = 0;
-            pthread_mutex_unlock(&g_file_lock);
+        if (events.size() > 0) {
+            dump();
         }
+    }
+
+    const std::vector<TraceEvent>& getEvents() {
+        return events;
+    }
+
+    void append(const TraceEvent& e) {
+        events.emplace_back(e);
+    }
+
+    void dump() {
+        get_dumper().dumpEvents(std::move(events));
+        events.clear();
+    }
+
+    const size_t size() {
+        return events.size();
+    }
+
+    const size_t capacity() {
+        return events.capacity();
     }
 };
 
-static void append_event(const char* event_json, size_t len) {
-    if (tls_pos + len + 1 > THREAD_BUFFER_SIZE) {
-        pthread_mutex_lock(&g_file_lock);
-        if (tls_pos > 0) {
-            fprintf(g_trace_file, "%.*s", (int)tls_pos, tls_buffer);
-            tls_pos = 0;
-        }
-        fprintf(g_trace_file, "%.*s", (int)len, event_json);
-        pthread_mutex_unlock(&g_file_lock);
-        return;
-    }
-    
-    memcpy(tls_buffer + tls_pos, event_json, len);
-    tls_pos += len;
-    if (tls_pos >= FLUSH_THRESHOLD) {
-        pthread_mutex_lock(&g_file_lock);
-        fprintf(g_trace_file, "%.*s", (int)tls_pos, tls_buffer);
-        tls_pos = 0;
-        pthread_mutex_unlock(&g_file_lock);
-    }
-}
-
-static void send_begin(const char* func_name, const char* file_name, int line, int column, uint64_t ts) {
-    static thread_local TlsFlushGuard flush_guard;
-    char buffer[1024];
-    int len = snprintf(buffer, sizeof(buffer),
-                       "{\"ph\":\"B\",\"pid\":%d,\"tid\":%u,\"ts\":%llu,\"name\":\"%s\",\"args\":{\"file\":\"%s\",\"line\":%d,\"column\":%d}},",
-                       getpid(), get_thread_id(), (unsigned long long)ts,
-                       func_name, file_name, line, column);
-    if (len > sizeof(buffer)) {
-        memset(buffer, 0, sizeof(buffer));
-        len = snprintf(buffer, sizeof(buffer),
-                       "{\"ph\":\"B\",\"pid\":%d,\"tid\":%u,\"ts\":%llu,\"name\":\"%.100s\",\"args\":{\"file\":\"%.200s\",\"line\":%d,\"column\":%d}},",
-                       getpid(), get_thread_id(), (unsigned long long)ts,
-                       func_name, file_name, line, column);
-    }
-    append_event(buffer, len);
-}
-
-static void send_end(uint64_t ts) {
-    char buffer[256];
-    int len = snprintf(buffer, sizeof(buffer),
-                       "{\"ph\":\"E\",\"pid\":%d,\"tid\":%u,\"ts\":%llu},",
-                       getpid(), get_thread_id(), (unsigned long long)ts);
-    append_event(buffer, len);
-}
 
 static void emit_event(uint64_t begin_t, uint64_t end_t, const char* func_name, const char* file_name, int line, int column) {
-    static thread_local TlsFlushGuard flush_guard;
-    char buffer[1024];
-    int len = snprintf(buffer, sizeof(buffer),
-                       "{\"ph\":\"X\",\"pid\":%d,\"tid\":%u,\"ts\":%llu,\"dur\":%llu,\"name\":\"%s\",\"args\":{\"file\":\"%s\",\"line\":%d,\"column\":%d}},",
-                       getpid(), get_thread_id(), (unsigned long long)begin_t, (unsigned long long)(end_t - begin_t), 
-                       func_name, file_name, line, column);
-    if (len > sizeof(buffer)) {
-        memset(buffer, 0, sizeof(buffer));
-        len = snprintf(buffer, sizeof(buffer),
-            "{\"ph\":\"X\",\"pid\":%d,\"tid\":%u,\"ts\":%llu,\"dur\":%llu,\"name\":\"%.100s...\",\"args\":{\"file\":\"%.200s\",\"line\":%d,\"column\":%d}},",
-            getpid(), get_thread_id(), (unsigned long long)begin_t, (unsigned long long)(end_t - begin_t), 
-            func_name, file_name, line, column);
+    static thread_local TlsFlushGuard tls;
+    static thread_local int cached_pid = getpid();
+    static thread_local uint32_t cached_tid = get_thread_id();
+    TraceEvent e {
+        TraceEvent::eventType::X,
+        cached_pid,
+        cached_tid,
+        begin_t,
+        end_t - begin_t,
+        line,
+        column,
+        func_name,
+        file_name
+    };
+    if (tls.size() == tls.capacity()) {
+        tls.dump();
     }
-    append_event(buffer, len);
+    tls.append(e);
 }
 
 
@@ -178,7 +157,9 @@ void __attribute__((constructor)) init_cctracer() {
         std::cerr << "Failed to open trace output file" << std::endl;
         return;
     }
-    fprintf(g_trace_file, "{\"traceEvents\":[");
+    DUMPER.preinit(g_trace_file);
+    DUMPER.initialize();
+
     g_cctracer_initialized.store(true, std::memory_order_release);
 }
 
@@ -189,20 +170,9 @@ void __attribute__((destructor)) shutdown_cctracer() {
     if (!g_cctracer_enabled) {
         return;
     }
-
-    if (!g_trace_file) {
-        std::cerr << "Trace file not open, cannot write trace output" << std::endl;
-        return;
-    }
-    pthread_mutex_lock(&g_file_lock);
-    if (tls_pos > 0) {
-        fprintf(g_trace_file, "%.*s", (int)tls_pos, tls_buffer);
-        tls_pos = 0;
-    }
-    fprintf(g_trace_file, "]}");
-    fclose(g_trace_file);
-    g_trace_file = NULL;
-    pthread_mutex_unlock(&g_file_lock);
+    
+    g_cctracer_enabled.store(false, std::memory_order_release);
+    DUMPER.stop();
 }
 
 } // namespace cctracer
@@ -226,8 +196,7 @@ extern "C" {
         }
 
         /* Emit Event */
-        uint64_t ts = cctracer::get_timestamp_us();
-        // cctracer::send_begin(func_name, file_name, line, column, ts);
+        uint64_t ts = cctracer::get_timestamp();
         return ts;
     }
 
@@ -237,8 +206,7 @@ extern "C" {
         }
 
         /* Emit Event */
-        uint64_t ts = cctracer::get_timestamp_us();
-        // cctracer::send_end(ts);
+        uint64_t ts = cctracer::get_timestamp();
         cctracer::emit_event(begin_time, ts, func_name, file_name, line, column);
     }
 
