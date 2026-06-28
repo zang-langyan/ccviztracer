@@ -83,7 +83,7 @@ elseif (LLVM)
 endif ()
 target_compile_options(example PRIVATE 
     -g
-    -O3
+    -O2
     ${PLUGIN_OPTION}   
 )
 target_link_libraries(example cctracer)
@@ -91,7 +91,7 @@ target_link_libraries(example cctracer)
 add_executable(multithread ${EXAMPLE_SRC_DIR}/multithread.cpp)
 target_compile_options(multithread PRIVATE 
     -g
-    -O3
+    -O2
     ${PLUGIN_OPTION}   
 )
 target_link_libraries(multithread cctracer)

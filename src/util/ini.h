@@ -73,7 +73,7 @@ struct Ini {
     bool load() {
         std::ifstream infile(path);
         if (!infile.is_open()) {
-            std::cerr << "Failed to open INI file: " << path << std::endl;
+            // std::cerr << "Failed to open INI file: " << path << std::endl;
             return false;
         }
         std::string line;

@@ -9,23 +9,27 @@ A debugging and profiling tool that can trace and visualize C/C++ code execution
 </figure>
 
 ## Usage
+### Configuration
+Create a `.cctracer.ini` at your home directory or project root directory, check out the `.cctracer.ini` file in this repo for detailed example.
+Or you can just set env variable `CCTRACER_ENABLE=1` to enable ccviztracer.
+
 ### Generate Trace
 #### LLVM clang
-If you are using `clang` then add `-fpass-plugin=cctracer_pass.dylib` and link against `cctracer`
+If you are using `clang` then add `-fpass-plugin=cctracer_pass.dylib` and link against `cctracer`. Don't forget to add `-g` or `-gline-tables-only` flag.
 ```sh
 # c
-clang your_source_file.c -fpass-plugin=cctracer_pass.dylib -lcctracer
+clang your_source_file.c -g -fpass-plugin=cctracer_pass.dylib -lcctracer
 # c++
-clang++ your_source_file.c -fpass-plugin=cctracer_pass.dylib -lcctracer
+clang++ your_source_file.c -g -fpass-plugin=cctracer_pass.dylib -lcctracer
 ```
 
 #### GNU gcc
-For `gcc` users, add `-fplugin=cctracer_pass.dylib` and link against `cctracer`
+For `gcc` users, add `-fplugin=cctracer_pass.dylib` and link against `cctracer`. Don't forget to add `-g` or `-gline-tables-only` flag.
 ```sh
 # c
-gcc your_source_file.c -fplugin=cctracer_pass.dylib -lcctracer
+gcc your_source_file.c -g -fplugin=cctracer_pass.dylib -lcctracer
 # c++
-g++ your_source_file.c -fplugin=cctracer_pass.dylib -lcctracer
+g++ your_source_file.c -g -fplugin=cctracer_pass.dylib -lcctracer
 ```
 
 #### CMake

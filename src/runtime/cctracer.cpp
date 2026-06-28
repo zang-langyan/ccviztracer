@@ -31,11 +31,12 @@ namespace cctracer {
 /* Tracing Control */
 static CCTracerConfig g_config;
 static bool load_config() {
-    if (!g_config.load_from_ini(getHomeDir() + "/.cctracer.ini")) {
-        std::cerr << "Failed to load CCTracer config from ~/.cctracer.ini,"
-            << " using default config." << std::endl;
-        return false;
+    if (g_config.load_from_ini(getHomeDir() + "/.cctracer.ini")) {
+        return true;
+    } else if (g_config.load_from_ini("./.cctracer.ini")) {
+        return true;
     }
+    std::cout << "Failed to find a config file, using default configuration.\n";
     return true;
 }
 
